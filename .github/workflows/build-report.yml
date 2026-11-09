@@ -1,0 +1,110 @@
+# This workflow will build a Java project with Maven
+# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-maven
+
+name: Build & Report
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+  schedule:
+    - cron: '0 3 * * *' # Every day at 03:00 UTC
+
+jobs:
+
+  verify:
+    # Don't run just after creating repo from template
+    #if: github.run_number != 1
+    runs-on: ubuntu-26.04
+    outputs:
+      skip_report_status: ${{ steps.check-codacy-token.outputs.skip_status }}
+    steps:
+
+      - name: Check Required Secrets
+        env:
+          CODACY_API_TOKEN: ${{ secrets.CODACY_API_TOKEN }}
+          AOC_APP_CLIENT_ID: ${{ secrets.AOC_APP_CLIENT_ID }}
+          AOC_APP_PRIVATE_KEY: ${{ secrets.AOC_APP_PRIVATE_KEY }}
+        run: |
+          set -uo pipefail
+          MISSING=0
+          for name in AOC_APP_CLIENT_ID AOC_APP_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing Secret::$name secret is not set."
+              MISSING=1
+            fi
+          done
+          exit "$MISSING"
+
+      # Codacy token is optional, in case of not wanting Codacy reports
+      - name: Check Codacy Project Token
+        id: check-codacy-token
+        continue-on-error: true
+        run: |
+          if [ -z "${{ secrets.CODACY_PROJECT_TOKEN }}" ]; then
+            echo "::warning title=Missing CODACY_PROJECT_TOKEN::Codacy coverage report job will be skipped."
+            echo "skip_status=true" >> $GITHUB_OUTPUT
+            exit 1 
+          fi
+          echo "skip_status=false" >> $GITHUB_OUTPUT
+
+  build:
+    runs-on: ubuntu-26.04
+    needs: verify
+    steps:
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ secrets.AOC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AOC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            ${{ github.event.repository.name }}-data
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          submodules: recursive
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+      - name: Set up JDK
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 27
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+      - name: Upload Jacoco report artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/jacoco.xml
+
+  # Report job
+  # Will be only executed if CODACY_PROJECT_TOKEN is set
+  report:
+    runs-on: ubuntu-26.04
+    needs: build
+    if: ${{ needs.verify.outputs.skip_report_status == 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download Jacoco report artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: jacoco-report
+          path: target/site/jacoco
+      - name: Send coverage to Codacy
+        uses: codacy/codacy-coverage-reporter-action@89d6c85cfafaec52c72b6c5e8b2878d33104c699 # v1.3.0
+        with:
+          project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}

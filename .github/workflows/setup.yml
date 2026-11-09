@@ -1,0 +1,245 @@
+name: Setup
+on:
+  workflow_dispatch:
+
+# This workflow can only have one active execution at any time
+concurrency:
+  group: setup-workflow
+
+env:
+  AOC_YEAR: ${{ vars.AOC_YEAR }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-26.04
+    outputs:
+      repo_name_solutions: ${{ steps.set-vars.outputs.repo_name_solutions }}
+      repo_name_data: ${{ steps.set-vars.outputs.repo_name_data }}
+    steps:
+      - name: Prevent Execution on Template Repository
+        run: |
+          set -euo pipefail
+          REPO_NAME="${{ github.event.repository.name }}"
+          if [[ "$REPO_NAME" == *"yyyy"* ]]; then
+            echo "::error title=Template Restriction::The Setup workflow cannot be executed directly from the template repository ($REPO_NAME)."
+            exit 1
+          fi
+      - name: Validate Year Format
+        id: set-vars
+        env:
+          YEAR: ${{ vars.AOC_YEAR }}
+        run: |
+          set -euo pipefail
+          CURRENT_YEAR=$(date +%Y)
+          MAX_YEAR=$((CURRENT_YEAR + 1))
+
+          if [[ -z "$YEAR" ]]; then
+            echo "::error title=Missing Year::No year input provided and AOC_YEAR variable is not set."
+            exit 1
+          fi
+          
+          if [[ ! "$YEAR" =~ ^[0-9]{4}$ ]]; then
+            echo "::error title=Invalid Year::Please provide a valid 4-digit year (e.g., $CURRENT_YEAR)."
+            exit 1
+          fi
+
+          # 10# forces base 10 so values like 0999 are not parsed as octal
+          YEAR_NUM=$((10#$YEAR))
+
+          if (( YEAR_NUM < 2015 || YEAR_NUM > MAX_YEAR )); then
+            echo "::error title=Invalid Year::Year must be between 2015 and $MAX_YEAR."
+            exit 1
+          fi
+
+          echo "Year '$YEAR' format is valid."
+          echo "repo_name_solutions=advent-of-code-$YEAR" >> $GITHUB_OUTPUT
+          echo "repo_name_data=advent-of-code-$YEAR-data" >> $GITHUB_OUTPUT
+
+      - name: Check Required Secrets
+        env:
+          CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+          AOC_APP_CLIENT_ID: ${{ secrets.AOC_APP_CLIENT_ID }}
+          AOC_APP_PRIVATE_KEY: ${{ secrets.AOC_APP_PRIVATE_KEY }}
+        run: |
+          set -uo pipefail
+          MISSING=0
+          for name in CODACY_PROJECT_TOKEN AOC_APP_CLIENT_ID AOC_APP_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing Secret::$name secret is not set."
+              MISSING=1
+            fi
+          done
+          exit "$MISSING"
+
+  update:
+    needs: verify
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ secrets.AOC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AOC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ needs.verify.outputs.repo_name_solutions }}
+            ${{ needs.verify.outputs.repo_name_data }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Ensure Setup Has Not Already Run
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          SUCCESS_COUNT=$(gh run list --workflow=setup.yml --status=success --limit=1 --json databaseId -q 'length')
+          
+          if [ "$SUCCESS_COUNT" -gt 0 ]; then
+            echo "::error title=Setup execution restriction::The Setup workflow can only be executed once."
+            exit 1
+          fi
+
+        # Update repository description
+      - name: Update Repository Description
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh repo edit -d "🎄 Advent of Code ${{ env.AOC_YEAR }}"
+
+        # Update repository topics
+      - name: Update Repository Topics
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh repo edit \
+            --add-topic "java" \
+            --add-topic "advent-of-code" \
+            --add-topic "advent-of-code-${{ env.AOC_YEAR }}" \
+            --add-topic "advent-of-code-${{ env.AOC_YEAR }}-java" \
+            --add-topic "advent-of-code-flashky"
+
+      - name: Render README from template
+        run: mv .github/templates/README.md README.md
+
+      # Clean up folders and README if AoC event is 2025 or newer.
+      - name: Clean Up (2025+)
+        if: ${{ env.AOC_YEAR >= 2025 }}
+        run: |
+          echo "Year ${{ env.AOC_YEAR }} is 2025 or greater. Performing cleanup..."
+          
+          echo "Removing day13-day25 source and test folders."
+          rm -rf src/{main,test}/java/com/adventofcode/flashk/day{13..25}
+          
+          echo "Removing day 13 to 25 links from README.md."
+          sed -i '/^- \[Day \(1[3-9]\|2[0-5]\)/d' README.md
+
+      # Update year placeholders
+      - name: Update year placeholders
+        run: |
+          find . \( -name 'README.md' -o -name 'pom.xml' \) -print0 \
+          | xargs -0 sed -i "s/yyyy/${AOC_YEAR}/g"
+
+      # Fetch Codacy Badges information
+      - name: Fetch Codacy Badges
+        id: codacy-badges
+        env:
+          CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME:  ${{ needs.verify.outputs.repo_name_solutions }}
+        run: |
+          set -euo pipefail
+          
+          RESPONSE=$(curl -s --request GET \
+                        --url "https://app.codacy.com/api/v3/organizations/gh/$OWNER/repositories/$REPO_NAME" \
+                        --header "project-token: $CODACY_PROJECT_TOKEN")
+          
+          GRADE_URL=$(echo "$RESPONSE" | jq -r '.data.badges.grade // empty')
+          COVERAGE_URL=$(echo "$RESPONSE" | jq -r '.data.badges.coverage // empty')
+          
+          if [ -z "$GRADE_URL" ] || [ -z "$COVERAGE_URL" ]; then
+            echo "::warning title=Codacy Badges Missing::Could not fetch badge URLs from Codacy API after multiple retries. Skipping badge injection."
+            echo "skip_badges=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Badges successfully fetched from Codacy!"
+          echo "skip_badges=false" >> $GITHUB_OUTPUT
+          echo "grade_url=$GRADE_URL" >> $GITHUB_OUTPUT
+          echo "coverage_url=$COVERAGE_URL" >> $GITHUB_OUTPUT
+
+      # Add Codacy badges
+      - name: Add Codacy Badges
+        if: steps.codacy-badges.outputs.skip_badges == 'false'
+        env:
+          GRADE_URL: ${{ steps.codacy-badges.outputs.grade_url }}
+          COVERAGE_URL: ${{ steps.codacy-badges.outputs.coverage_url }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ needs.verify.outputs.repo_name_solutions }}
+        run: |
+          set -euo pipefail
+          
+          GRADE_BADGE="[![Codacy Badge]($GRADE_URL)](https://app.codacy.com/gh/$OWNER/$REPO_NAME/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)"
+          COVERAGE_BADGE="[![Codacy Badge]($COVERAGE_URL)](https://app.codacy.com/gh/$OWNER/$REPO_NAME/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)"
+          
+          sed -i "3i\\
+          $GRADE_BADGE\\
+          $COVERAGE_BADGE" README.md
+
+      # Add data submodule
+      - name: Add Data Submodule
+        env:
+          OWNER:  ${{ github.repository_owner }}
+          REPO_NAME:  ${{ needs.verify.outputs.repo_name_data }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "Adding private data repository $REPO_NAME as submodule..."
+          
+          if git submodule status src/test/resources/inputs >/dev/null 2>&1 || [[ -f src/test/resources/inputs/.git ]]; then
+            echo "Submodule already present or registered at src/test/resources/inputs. Updating..."
+            git -c "http.https://github.com/.extraheader=$AUTH_HEADER" submodule update --init --recursive src/test/resources/inputs
+          else
+            git -c "http.https://github.com/.extraheader=$AUTH_HEADER" \
+              submodule add -b master "https://github.com/${OWNER}/${REPO_NAME}.git" src/test/resources/inputs
+          fi
+
+      # Remove not needed workflows
+      - name: Remove one-shot workflows
+        run: rm .github/workflows/setup.yml .github/workflows/create-repo.yml
+
+      # Open Pull Request
+      - name: Open Pull Request
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
+        id: pull-request
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          commit-message: "Update year to ${{ env.AOC_YEAR}}"
+          sign-commits: true
+          branch: feature/setup
+          delete-branch: true
+          title: "Update year to ${{ env.AOC_YEAR}}"
+          body: |
+            This PR is auto-generated by [create-pull-request](https://github.com/peter-evans/create-pull-request).
+
+      # Check PR information
+      - name: Check PR information
+        if: ${{ steps.pull-request.outputs.pull-request-number }}
+        run: |
+          echo "Pull Request Number - ${{ steps.pull-request.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.pull-request.outputs.pull-request-url }}"
+
+      - name: Enable Pull Request Auto-Merge
+        if: ${{ steps.pull-request.outputs.pull-request-url != '' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_URL:  ${{ steps.pull-request.outputs.pull-request-url }}
+        run: |
+          if gh pr merge --auto --squash "$PR_URL" --delete-branch; then
+            echo "Auto-merge has been enabled. Pull Request will be merged after all checks are met."
+          else
+            echo "All checks are currently met. Merging directly"
+            gh pr merge "$PR_URL" --squash --delete-branch
+          fi
