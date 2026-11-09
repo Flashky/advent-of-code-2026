@@ -1,31 +1,45 @@
-# 🎄 Advent of Code - Java template
+# 🎄 Advent of Code 2026
 
-Template that scaffolds a complete Advent of Code setup generating:
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/02376568df25454aa76574bbb5b69161)](https://app.codacy.com/gh/Flashky/advent-of-code-2026/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![Codacy Badge](https://app.codacy.com/project/badge/Coverage/02376568df25454aa76574bbb5b69161)](https://app.codacy.com/gh/Flashky/advent-of-code-2026/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
 
-- A public solutions repository
-- A private inputs repository (which is wired as a git submodule at the solutions repo)
+- [Day 1](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day01)
+- [Day 2](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day02)
+- [Day 3](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day03)
+- [Day 4](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day04)
+- [Day 5](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day05)
+- [Day 6](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day06)
+- [Day 7](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day07)
+- [Day 8](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day08)
+- [Day 9](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day09)
+- [Day 10](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day10)
+- [Day 11](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day11)
+- [Day 12](https://github.com/Flashky/advent-of-code-2026/tree/master/src/main/java/com/adventofcode/flashk/day12)
 
-## Requirements
+## Cloning this repository
 
-Configure the following secrets in this repository:
+Clone with data repository:
 
-| Secret | Purpose |
-|---|---|
-| `PAT_TOKEN` | Creates the repositories |
-| `CODACY_API_TOKEN` | Registers the projects in Codacy |
-| `AOC_APP_CLIENT_ID` | GitHub App used by the generated repository |
-| `AOC_APP_PRIVATE_KEY` | GitHub App private key |
+```bash
+git clone https://github.com/Flashky/advent-of-code-2026.git --recurse-submodules
+```
 
-## 🚀 Usage
+## Update data submodule
 
-1. Go to **Actions → Create AoC repository → Run workflow**.
-2. Enter the year (e.g. `2026`).
+Use the following command to update the data submodule if there are any remote changes:
 
-**And that's pretty much it!**
-Workflows will generate and auto-merge a pull request on each repository to scaffold everything automatically.
+```bash
+git submodule update --recursive --remote
+```
 
-This README exists only in the template. Generated repositories get their own.
+## Re-attach local repository
+
+If the local repo becomes detached, execute:
+
+```bash
+git checkout master
+```
 
 ## About
 
-- [Advent of Code](https://adventofcode.com/about)
+- [Advent of Code](https://adventofcode.com/2026/about)
